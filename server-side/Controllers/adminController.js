@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import util from 'util';
 import mysqlConn from '../database/connection.js';
 import { Resend } from 'resend';
+import jwt from 'jsonwebtoken';
 
 dotenv.config();
 
@@ -318,3 +319,53 @@ async function generatePDF(records) {
   });
 }
 
+export const login = async(req, res)=>{
+  try{
+    const {email, password} = req.body;
+    if(!email || !password){
+      return res.status(400).json({message: "All inputs are required!"});
+    }
+    const getAdmin = await query('SELECT * FROM admin WHERE email = ?', [email])
+    if(getAdmin.length === 0){
+      return res.status(401).json({message: "Invalid Credential."});
+    }
+    const admin = getAdmin[0];
+    const isPasswordMatched = await bcrypt.compare(password, admin.password);
+
+    if(!isPasswordMatched){
+      return res.status(401).json({message: "Invalid Credential."});
+    }
+    const token = jwt.sign(
+      {email: admin.email },
+      process.env.ADMIN_SECRET_KEY,
+      {expiresIn: "1h",
+      });
+      return res.status(200).json({message: "Login Successful!", token, user: admin})
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "An error occured."});
+  }
+}
+
+export const signup = async(req, res)=>{
+  try{
+    const {email, password, confirmpassword} = req.body;
+    if(!email || !password || !confirmpassword){
+      return res.status(400).json({message: "All fields are required!"});
+    }
+    //Check if confirm password is matched with actual password
+    if(confirmpassword !== password) return res.status(400).json({message: "Passwords do not match"})
+
+    const checkExistingAdmin = await query('SELECT * FROM admin');
+    //Check if there is an existing admin
+    if(!checkExistingAdmin.length === 0){
+      return res.status(400).json({message: "Registration is closed! Admin already exists."});
+    }
+    const hashedPassword = await bcrypt.hash(password, 12);
+    const addAdmin = await query('INSERT INTO admin(email, password) values(?,?)', [email, hashedPassword]);
+    return res.status(201).json({message: "Account created successfully."});
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "An error occured."});
+  }
+}
