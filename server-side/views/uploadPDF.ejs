@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Decrypt Medical Records</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f9f9f9;
+      margin: 20px;
+      color: #333;
+    }
+
+    form {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      max-width: 420px;
+      margin-bottom: 30px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 15px;
+      font-weight: 600;
+      color: #444;
+    }
+
+    input[type="file"],
+    input[type="text"],
+    input[type="password"] {
+      width: 100%;
+      padding: 8px 10px;
+      margin-top: 6px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+
+    button {
+      background-color: #007bff;
+      color: white;
+      padding: 10px 20px;
+      font-size: 1rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s ease;
+    }
+
+    button:hover {
+      background-color: #0056b3;
+    }
+
+    #output {
+      max-width: 600px;
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    .record {
+      border-bottom: 1px solid #ddd;
+      padding: 15px 0;
+    }
+
+    .record:last-child {
+      border-bottom: none;
+    }
+
+    .record-title {
+      font-weight: 700;
+      font-size: 1.2rem;
+      color: #007bff;
+      margin-bottom: 6px;
+    }
+
+    .record-number {
+      font-size: 0.9rem;
+      color: #666;
+      margin-bottom: 8px;
+    }
+
+    .record-content {
+      background: #f4f6fb;
+      padding: 12px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      font-family: 'Courier New', Courier, monospace;
+      color: #222;
+    }
+
+    .error {
+      color: #b00020;
+      font-weight: 600;
+      background: #fddede;
+      padding: 10px;
+      border-radius: 4px;
+      max-width: 600px;
+    }
+  </style>
+</head>
+<body>
+
+  <form id="decryptForm" enctype="multipart/form-data">
+    <label>
+      PDF File:
+      <input type="file" name="pdf" accept=".pdf" required />
+    </label>
+
+    <label>
+      Patient ID:
+      <input type="text" name="patient_id" required />
+    </label>
+
+    <label>
+      Passphrase:
+      <input type="password" name="passphrase" required />
+    </label>
+
+    <button type="submit">Decrypt Records</button>
+  </form>
+
+  <div id="output"></div>
+
+  <script>
+    document.getElementById('decryptForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const outputDiv = document.getElementById('output');
+      outputDiv.innerHTML = 'Decrypting... Please wait.';
+
+      const formData = new FormData(e.target);
+      try {
+        const res = await fetch('/patient/decrypt-upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        const result = await res.json();
+
+        if (!res.ok) {
+          outputDiv.innerHTML = `<div class="error">${result.message || 'Failed to decrypt records.'}</div>`;
+          return;
+        }
+
+        if (!result.decryptedResults || result.decryptedResults.length === 0) {
+          outputDiv.innerHTML = `<div class="error">No records found or failed to decrypt.</div>`;
+          return;
+        }
+
+        // Clear output
+        outputDiv.innerHTML = '';
+
+        // Render each record with styling
+        result.decryptedResults.forEach(record => {
+          // Parse JSON if records are stringified, else use directly
+          let rec = record;
+          if (typeof record === 'string') {
+            try {
+              rec = JSON.parse(record);
+            } catch {
+              rec = { recordNumber: '?', title: 'Unknown', decrypted: record };
+            }
+          }
+
+          const recordEl = document.createElement('div');
+          recordEl.className = 'record';
+
+          recordEl.innerHTML = `
+            <div class="record-number">Record #${rec.recordNumber || '?'}</div>
+            <div class="record-title">${rec.title || 'Untitled'}</div>
+            <div class="record-content">${rec.decrypted || 'No decrypted content available.'}</div>
+          `;
+
+          outputDiv.appendChild(recordEl);
+        });
+
+      } catch (err) {
+        outputDiv.innerHTML = `<div class="error">An error occurred while decrypting records.</div>`;
+        console.error(err);
+      }
+    });
+  </script>
+
+</body>
+</html>
