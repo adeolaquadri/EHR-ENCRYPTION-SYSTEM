@@ -6,6 +6,9 @@ import util from 'util';
 import mysqlConn from '../database/connection.js';
 import { Resend } from 'resend';
 import jwt from 'jsonwebtoken';
+import {nanoid} from 'nanoid';
+
+const patientId = 'PAT-' + nanoid(6); // e.g., "PAT-1a2b3C"
 
 dotenv.config();
 
@@ -110,14 +113,14 @@ export const decryptMedicalHistoryHybrid = (encryptedAesKey, ivHex, encryptedDat
 
 export const addPatient = async (req, res) => {
   try {
-    const {
-      patient_id, insurance_id, firstname, middlename, lastname, email,
+    const {firstname, middlename, lastname, email,
       phone_number, dob, gender, address, next_of_kin_name, next_of_kin_number,
-      blood_type, password
+      blood_type, relationship_with_next_of_kin
     } = req.body;
 
     // Check if patient already exists
-    const existing = await query('SELECT * FROM patient_details WHERE patient_id = ?', [patient_id]);
+    const existing = await query('SELECT * FROM patient_details WHERE patient_id = ?', [patientId]);
+    console.log(patientId);
     if (existing.length > 0) return res.status(400).json({ message: 'Patient already exists' });
 
     // Generate RSA key pair
@@ -134,17 +137,18 @@ export const addPatient = async (req, res) => {
     const { encryptedPrivateKey, iv, salt } = encryptPrivateKeyWithPassphrase(privateKey, passphrase);
 
     // Hash patient password for authentication
+    const password = process.env.DEFAULT_PASSWORD;
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Store patient details + keys in DB
     await query(
       `INSERT INTO patient_details (
-        patient_id, insurance_id, firstname, middlename, lastname, email, phone_number, dob, gender, address,
-        next_of_kin_name, next_of_kin_number, password, public_key, encrypted_private_key, iv, salt, blood_type
+     patient_id, firstname, middlename, lastname, email, phone_number, dob, gender, address,
+        next_of_kin_name, next_of_kin_number, password, public_key, encrypted_private_key, iv, salt, blood_type, relationship_with_next_of_kin
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        patient_id, insurance_id, firstname, middlename, lastname, email, phone_number, dob, gender, address,
-        next_of_kin_name, next_of_kin_number, hashedPassword, publicKey, encryptedPrivateKey, iv, salt, blood_type
+       patientId, firstname, middlename, lastname, email, phone_number, dob, gender, address, next_of_kin_name, 
+        next_of_kin_number, hashedPassword, publicKey, encryptedPrivateKey, iv, salt, blood_type, relationship_with_next_of_kin
       ]
     );
 
@@ -167,6 +171,19 @@ export const addPatient = async (req, res) => {
   }
 };
 
+// -- CONTROLLER: Get Patients
+
+export const getPatients = async(req, res)=>{
+  try{
+    const fetchAllPatients = await query('SELECT * FROM patient_details');
+    const patients = fetchAllPatients;
+    return res.status(200).json({patients});
+
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "Error Occured."})
+  }
+}
 
 // --- CONTROLLER: Add Medical History ---
 

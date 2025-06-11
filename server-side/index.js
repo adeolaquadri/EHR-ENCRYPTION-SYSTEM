@@ -9,13 +9,14 @@ import fs from 'fs'
 import cors from 'cors';
 const app = express();
 dotenv.config();
+const {CLIENT_URL} = process.env;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 app.use(express.json());
 app.use(express.urlencoded({extended:true}));
 app.use(cors({
-   origin: process.env.CLIENT_URL,
+   origin: CLIENT_URL,
    credentials: true
 }));
 
