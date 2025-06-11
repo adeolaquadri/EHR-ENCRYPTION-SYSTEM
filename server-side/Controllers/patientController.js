@@ -60,13 +60,14 @@ export const resetPassword = async (req, res) => {
 // Request Medical History Controller
 export const requestMedicalHistory = async (req, res) => {
   try {
-    const { patient_id, email } = req.body;
-    if (!patient_id || !email) return res.status(400).json({ message: "All inputs are required!" });
+    const { patient_id } = req.body;
+    if (!patient_id) return res.status(400).json({ message: "Input is required!" });
 
-    const patient = await query('SELECT firstname, lastname, middlename FROM patient_details WHERE patient_id = ?', [patient_id]);
+    const patient = await query('SELECT firstname, email, lastname, middlename FROM patient_details WHERE patient_id = ?', [patient_id]);
     if (patient.length === 0) return res.status(404).json({ message: "Patient not found" });
 
     const fullName = `${patient[0].lastname} ${patient[0].firstname} ${patient[0].middlename}`;
+    const email = patient[0].email;
 
     const records = await query('SELECT title, encryptedData FROM patient_medical_history WHERE patient_id = ?', [patient_id]);
     const { encryptedPdfBuffer, filename } = await generateEncryptedPDF(records, fullName);

@@ -12,7 +12,7 @@ route.post('/login', login); //Route: Patient Login
 
 route.post('/reset-password', verifyToken, resetPassword); //Route: Patient reset password
 
-route.post('/request-history',medicalHistoryLimiter, requestMedicalHistory);
+route.post('/request-history', requestMedicalHistory);
 
 route.post('/decrypt-upload', decryptUploadPDF);
 
