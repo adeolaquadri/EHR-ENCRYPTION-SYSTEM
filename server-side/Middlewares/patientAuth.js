@@ -8,6 +8,7 @@ export const verifyToken = (req, res, next) => {
     const authHeader = req.headers.authorization;
   
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log(`Authorization Header: ${authHeader}`);
       return res.status(401).json({ message: "Access Denied" });
     }
   

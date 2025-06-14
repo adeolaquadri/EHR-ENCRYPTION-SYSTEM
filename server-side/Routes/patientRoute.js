@@ -1,19 +1,20 @@
 import { Router } from "express";
-import {  decryptUploadPDF, login, requestMedicalHistory, resetPassword } from "../Controllers/patientController.js";
+import {  decryptUploadPDF, getPatientNotifications, login, patientProfile, requestMedicalHistory, resetPassword } from "../Controllers/patientController.js";
 import { verifyToken, medicalHistoryLimiter } from "../Middlewares/patientAuth.js";
 const route = Router();
 
+//Patient Route
+route.post('/login', login); //POST: Login
 
-route.get('/decrypt-upload', (req, res)=>{
-   res.render('uploadPDF.ejs')
-})
+route.get('/profile', verifyToken, patientProfile); //GET: Profile
 
-route.post('/login', login); //Route: Patient Login
+route.post('/reset-password', verifyToken, resetPassword); //POST: Reset Password
 
-route.post('/reset-password', verifyToken, resetPassword); //Route: Patient reset password
+route.get('/request-history', verifyToken, requestMedicalHistory); //GET: Request Medical History
 
-route.post('/request-history', requestMedicalHistory);
+route.post('/decrypt-upload', verifyToken, decryptUploadPDF); //POST: Decrypt Encrypted Medical History
 
-route.post('/decrypt-upload', decryptUploadPDF);
+route.get('/notifications', verifyToken, getPatientNotifications); //GET: Get Notifications
+
 
 export default route;

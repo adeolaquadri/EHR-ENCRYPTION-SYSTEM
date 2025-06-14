@@ -117,10 +117,10 @@ export const addPatient = async (req, res) => {
       phone_number, dob, gender, address, next_of_kin_name, next_of_kin_number,
       blood_type, relationship_with_next_of_kin
     } = req.body;
+    const admin_email = req.user.email;
 
     // Check if patient already exists
     const existing = await query('SELECT * FROM patient_details WHERE patient_id = ?', [patientId]);
-    console.log(patientId);
     if (existing.length > 0) return res.status(400).json({ message: 'Patient already exists' });
 
     // Generate RSA key pair
@@ -162,7 +162,8 @@ export const addPatient = async (req, res) => {
              <pre><strong>${passphrase}</strong></pre>
              <p>Keep it private. Do not share it with anyone.</p>`
     });
-
+     await query('INSERT INTO admin_notifications (admin_email, message) VALUES (?, ?)',
+        [admin_email, `Patient with id "${patientId}" added successfully and passphrase sent to email`]);
     return res.status(201).json({ message: 'Patient added successfully and passphrase sent to email' });
 
   } catch (error) {
@@ -189,73 +190,46 @@ export const getPatients = async(req, res)=>{
 
 export const addMedicalHistory = async (req, res) => {
   try {
-    const { patient_id, title, medical_history_text } = req.body;
+    const { patient_id, records } = req.body;
+    const admin_email = req.user.email
 
-    // Get patient's public key from DB
-    const result = await query('SELECT public_key FROM patient_details WHERE patient_id = ?', [patient_id]);
+    if (!patient_id || !Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ message: "Patient ID and multiple records are required." });
+    }
+
+    // Get patient's public key
+    const result = await query('SELECT public_key, lastname, firstname, middlename FROM patient_details WHERE patient_id = ?', [patient_id]);
     if (result.length === 0) return res.status(404).json({ message: 'Patient not found' });
 
     const publicKey = result[0].public_key;
+    const name = `${result[0].lastname} ${result[0].firstname} ${result[0].middlename}`
 
-    // Encrypt medical history using hybrid method
-    const { encryptedAesKey, iv, encryptedData } = encryptMedicalHistoryHybrid(medical_history_text, publicKey);
+    // Encrypt and store each record individually
+    for (const record of records) {
+      const { title, medical_history_text } = record;
 
-    // Store encrypted medical history in a separate table
-    await query(
-      `INSERT INTO patient_medical_history (patient_id, encrypted_aes_key, iv, title, encryptedData)
-       VALUES (?, ?, ?, ?, ?)`,
-      [patient_id, encryptedAesKey, iv, title, encryptedData]
-    );
+      if (!title || !medical_history_text) {
+        console.warn("Skipping invalid record:", record);
+        continue;
+      }
 
-    return res.status(201).json({ message: 'Medical history encrypted and stored successfully' });
+      const { encryptedAesKey, iv, encryptedData } = encryptMedicalHistoryHybrid(medical_history_text, publicKey);
+
+      await query(
+        `INSERT INTO patient_medical_history (patient_id, encrypted_aes_key, iv, title, encryptedData)
+         VALUES (?, ?, ?, ?, ?)`,
+        [patient_id, encryptedAesKey, iv, title, encryptedData]
+      );
+    }
+    await query('INSERT INTO admin_notifications (admin_email, message) VALUES (?, ?)',
+        [admin_email, `${name.toUpperCase} medical history records encrypted and stored successfully..`]);
+    return res.status(201).json({ message: 'All medical history records encrypted and stored successfully.' });
 
   } catch (error) {
     console.error('Error adding medical history:', error);
     return res.status(500).json({ message: 'Internal server error' });
   }
 };
-
-
-// --- CONTROLLER: Get Decrypted Medical History ---
-
-// export const getDecryptedMedicalHistory = async (req, res) => {
-//   try {
-//     const { patient_id, passphrase } = req.body;
-
-//     // Get encrypted private key, iv, salt from DB
-//     const result = await query(
-//       'SELECT encrypted_private_key, iv, salt FROM patient_details WHERE patient_id = ?',
-//       [patient_id]
-//     );
-
-//     if (result.length === 0) return res.status(404).json({ message: 'Patient not found' });
-
-//     const { encrypted_private_key, iv, salt } = result[0];
-
-//     // Decrypt private key using passphrase
-//     const privateKey = decryptPrivateKeyWithPassphrase(encrypted_private_key, passphrase, iv, salt);
-
-//     // Get patient's encrypted medical history
-//     const historyResult = await query(
-//       'SELECT encrypted_aes_key, iv, encrypted_data FROM patient_medical_history WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1',
-//       [patient_id]
-//     );
-
-//     if (historyResult.length === 0) return res.status(404).json({ message: 'No medical history found' });
-
-//     const { encrypted_aes_key, iv: historyIv, encrypted_data } = historyResult[0];
-
-//     // Decrypt medical history
-//     const decryptedMedicalHistory = decryptMedicalHistoryHybrid(encrypted_aes_key, historyIv, encrypted_data, privateKey);
-
-//     return res.status(200).json({ medical_history: decryptedMedicalHistory });
-
-//   } catch (error) {
-//     console.error('Error decrypting medical history:', error);
-//     return res.status(500).json({ message: 'Internal server error or invalid passphrase' });
-//   }
-// };
-
 
 
 export const sendDecryptedMedicalHistoryByEmail = async (req, res) => {
@@ -386,3 +360,44 @@ export const signup = async(req, res)=>{
     return res.status(500).json({message: "An error occured."});
   }
 }
+
+export const resetPassword = async(req, res)=>{
+  try{
+    const {oldPassword, newPassword} = req.body;
+    const {email} = req.user;
+    
+    //Check if the admin exist...
+    const getAdmin = await query("SELECT * FROM admin WHERE email = ?", [email]);
+    if(getAdmin.length === 0) return res.status(404).json({message: "Invalid token!", success: false});
+    const admin = getAdmin[0];
+
+    //Check if the old password is valid...
+    const isValidPassword = await bcrypt.compare(oldPassword, admin.password);
+    if(!isValidPassword) return res.status(400).json({message: "Your current password is invalid", success: false});
+
+    const password = await bcrypt.hash(newPassword, 12)
+    await query("UPDATE admin SET password = ? WHERE email = ?", [password, email]);
+    await query('INSERT INTO admin_notifications (admin_email, message) VALUES (?, ?)',
+        [email, "Password has been reset successfully."]);
+    return res.status(200).json({message: "Password has been reset successfully.", success: true});
+
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "Error submitting request..."})
+  }
+}
+
+export const getNotifications = async (req, res) => {
+  try {
+    const admin_email = req.user.email;
+
+    const rows = await query(
+      'SELECT id, message, DATE_FORMAT(created_at, "%M %d, %Y") as date, DATE_FORMAT(created_at, "%h:%i %p") as time FROM admin_notifications WHERE admin_email = ? ORDER BY created_at DESC',
+      [admin_email]
+    );
+    return res.status(200).json({ notifications: rows });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    return res.status(500).json({ message: 'Failed to retrieve notifications.' });
+  }
+};

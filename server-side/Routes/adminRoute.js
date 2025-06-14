@@ -2,25 +2,28 @@ import { Router } from "express";
 import {
     addMedicalHistory,
     addPatient,
+    getNotifications,
     getPatients,
     login,
-    sendDecryptedMedicalHistoryByEmail,
+    resetPassword,
     signup} from "../Controllers/adminController.js"
 import { verifyToken } from "../Middlewares/adminAuth.js";
 const route = Router();
 
-//Patient Route
+//Admin Route
 
-route.post('/login', login);
+route.post('/login', login); //POST: Login into your account
 
-route.post('/signup', signup);
+route.post('/signup', signup); //POST: Signup
 
-route.post('/add_patient', verifyToken, addPatient);
+route.post('/reset-password', verifyToken, resetPassword); //POST: Reset Password
 
-route.get('/patients', verifyToken, getPatients);
+route.post('/add_patient', verifyToken, addPatient); //POST: Add New Patient
 
-route.post('/add_patient_medical_history', addMedicalHistory) //POST: Add Patient Medical History
+route.get('/patients', verifyToken, getPatients); //GET: Fetch all patients
 
-route.post('/send-decrypt-medical-record', sendDecryptedMedicalHistoryByEmail)
+route.post('/add_patient_medical_history', verifyToken, addMedicalHistory); //POST: Add Patient Medical History
+
+route.get('/notifications', verifyToken, getNotifications); //GET: Get Notifications
 
 export default route;

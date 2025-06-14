@@ -9,6 +9,7 @@ import { Resend } from "resend";
 import { PassThrough } from "stream";
 import fs from 'fs'
 import dotenv from 'dotenv';
+import crypto from "crypto"
 import PDFParser from "pdf2json";
 import { decryptPrivateKeyWithPassphrase, decryptMedicalHistoryHybrid } from "./adminController.js";
 
@@ -16,13 +17,19 @@ dotenv.config();
 const resend = new Resend(process.env.RESEND_API_KEY);
 const query = util.promisify(mysqlConn.query).bind(mysqlConn);
 
+function hashBase64(base64String) {
+  return crypto.createHash('sha256').update(base64String.trim().replace(/\s+/g, '')).digest('hex');
+}
+
+
 // Login Controller
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: "All fields are required!" });
 
-    const [patient] = await query('SELECT * FROM patient_details WHERE email = ?', [email]);
+    const getPatient = await query('SELECT * FROM patient_details WHERE email = ?', [email]);
+    const patient = getPatient[0];
     if (!patient) return res.status(401).json({ message: "Invalid credential" });
 
     const validPassword = await bcrypt.compare(password, patient.password);
@@ -30,7 +37,7 @@ export const login = async (req, res) => {
 
     const token = jwt.sign({ id: patient.patient_id }, process.env.SECRET_KEY, { expiresIn: "1d" });
     const { encrypted_private_key, iv } = patient;
-    return res.status(200).json({ message: "Login successfully", token, encrypted_private_key, iv });
+    return res.status(200).json({ message: "Login successfully", token, user: patient, encrypted_private_key, iv });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Internal server error" });
@@ -40,16 +47,20 @@ export const login = async (req, res) => {
 // Reset Password Controller
 export const resetPassword = async (req, res) => {
   try {
-    const { oldpassword, newpassword } = req.body;
-    if (!oldpassword || !newpassword) return res.status(400).json({ message: "All fields are required!" });
+    const { oldPassword, newPassword } = req.body;
+    const {id} = req.user;
+    if (!oldPassword || !newPassword) return res.status(400).json({ message: "All fields are required!" });
 
-    const [patient] = await query('SELECT password FROM patient_details WHERE patient_id = ?', [verified.id]);
-    const validPassword = await bcrypt.compare(oldpassword, patient.password);
+    const [patient] = await query('SELECT password FROM patient_details WHERE patient_id = ?', [id]);
+    const validPassword = await bcrypt.compare(oldPassword, patient.password);
     if (!validPassword) return res.status(400).json({ message: "Your current password is invalid" });
 
-    const hashedPassword = await bcrypt.hash(newpassword, 10);
-    await query('UPDATE patient_details SET password = ? WHERE patient_id = ?', [hashedPassword, verified.id]);
-    return res.status(200).json({ message: "Password updated successfully" });
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await query('UPDATE patient_details SET password = ? WHERE patient_id = ?', [hashedPassword, id]);
+
+     await query('INSERT INTO patient_notifications (patient_id, message) VALUES (?, ?)',
+      [id, "Password updated successfully."]);
+    return res.status(200).json({ message: "Password updated successfully." });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Internal server error!" });
@@ -60,16 +71,17 @@ export const resetPassword = async (req, res) => {
 // Request Medical History Controller
 export const requestMedicalHistory = async (req, res) => {
   try {
-    const { patient_id } = req.body;
-    if (!patient_id) return res.status(400).json({ message: "Input is required!" });
+    const patient_id  = req.user.id;
+    if (!patient_id) return res.status(400).json({success:false, message: "Input is required!" });
 
     const patient = await query('SELECT firstname, email, lastname, middlename FROM patient_details WHERE patient_id = ?', [patient_id]);
-    if (patient.length === 0) return res.status(404).json({ message: "Patient not found" });
+    if (patient.length === 0) return res.status(404).json({success:false, message: "Patient not found" });
 
     const fullName = `${patient[0].lastname} ${patient[0].firstname} ${patient[0].middlename}`;
     const email = patient[0].email;
 
     const records = await query('SELECT title, encryptedData FROM patient_medical_history WHERE patient_id = ?', [patient_id]);
+    if(records.length === 0) return res.status(404).json({success: false, message:"No Medical History Record."})
     const { encryptedPdfBuffer, filename } = await generateEncryptedPDF(records, fullName);
 
     const emailResponse = await resend.emails.send({
@@ -81,6 +93,8 @@ export const requestMedicalHistory = async (req, res) => {
     });
 
     console.log("Email sent result:", emailResponse);
+      await query('INSERT INTO patient_notifications (patient_id, message) VALUES (?, ?)',
+      [patient_id, "Medical history has been emailed securely."]);
     res.json({ success: true, message: 'Medical history has been emailed securely.' });
   } catch (err) {
     console.error(err);
@@ -241,46 +255,55 @@ function extractTextLinesFromPdf2Json(pdfData) {
 function extractEncryptedRecords(lines) {
   const records = [];
   let currentRecord = null;
-  let collectingEncrypted = false;
-  let encryptedLines = [];
+  let inEncryptedDataBlock = false;
 
-  for (const line of lines) {
-    const trimmed = line.trim();
+  lines.forEach((line) => {
+    line = line.trim();
 
-    if (trimmed.startsWith('Record #')) {
+    // Start of new record
+    if (line.startsWith("Record #")) {
       if (currentRecord) {
-        currentRecord.encryptedBase64 = encryptedLines.join('');
         records.push(currentRecord);
       }
-      currentRecord = { recordNumber: trimmed.split('#')[1], title: '', encryptedBase64: '' };
-      encryptedLines = [];
-      collectingEncrypted = false;
-    } else if (trimmed.startsWith('Title:') && currentRecord) {
-      currentRecord.title = trimmed.replace('Title:', '').trim();
-    } else if (trimmed === 'Encrypted Data:' && currentRecord) {
-      collectingEncrypted = true;
-      encryptedLines = [];
-    } else if (collectingEncrypted) {
-      if (!trimmed || trimmed.startsWith('Record #') || trimmed.startsWith('Title:')) {
-        collectingEncrypted = false;
-        if (currentRecord) {
-          currentRecord.encryptedBase64 = encryptedLines.join('');
-          records.push(currentRecord);
-          currentRecord = null;
-        }
+
+      const recordNumber = line.match(/Record\s+#(\d+)/i)?.[1] || 'Unknown';
+      currentRecord = {
+        recordNumber,
+        title: '',
+        encryptedBase64: ''
+      };
+      inEncryptedDataBlock = false;
+    }
+
+    // Title line
+    else if (line.startsWith("Title:") && currentRecord) {
+      currentRecord.title = line.replace("Title:", "").trim();
+    }
+
+    // Start collecting encrypted data
+    else if (line.startsWith("Encrypted Data:") && currentRecord) {
+      inEncryptedDataBlock = true;
+    }
+
+    // Continue encrypted data
+    else if (inEncryptedDataBlock && currentRecord) {
+      if (line === '' || line.startsWith("Record #")) {
+        inEncryptedDataBlock = false; // Stop if blank or next record starts
       } else {
-        encryptedLines.push(trimmed);
+        currentRecord.encryptedBase64 += line;
       }
     }
-  }
+  });
 
-  if (currentRecord && encryptedLines.length > 0) {
-    currentRecord.encryptedBase64 = encryptedLines.join('');
+  // Push the last record
+  if (currentRecord) {
     records.push(currentRecord);
   }
 
   return records;
 }
+
+
 
 // Generate decrypted PDF from records
 async function generateDecryptedPDF(records, patientName) {
@@ -370,32 +393,36 @@ async function sendEmailWithAttachment(toEmail, patientName, pdfBuffer, patientI
 // Main decrypt upload PDF handler
 export const decryptUploadPDF = [
   upload.single('pdf'),
-  async (req, res) => {
-    const { passphrase, patient_id } = req.body;
 
-    if (!req.file || !passphrase || !patient_id) {
-      return res.status(400).json({ message: 'Missing PDF file, passphrase, patient ID, patient email, or patient name.' });
+  async (req, res) => {
+    const { passphrase } = req.body;
+    const patient_id = req.user.id;
+
+    if (!req.file || !passphrase) {
+      return res.status(400).json({ message: 'Missing PDF file or passphrase.' });
     }
 
     try {
-      // 1. Get encrypted private key + metadata from DB
-      const rows = await query('SELECT encrypted_private_key, iv, salt, email, lastname, firstname, middlename FROM patient_details WHERE patient_id = ?', [patient_id]);
-      if (rows.length === 0) return res.status(404).json({ message: 'Patient not found.' });
+      // 1. Get patient metadata
+      const [patientRow] = await query(
+        'SELECT encrypted_private_key, iv, salt, email, lastname, firstname, middlename FROM patient_details WHERE patient_id = ?',
+        [patient_id]
+      );
+      if (!patientRow) return res.status(404).json({ message: 'Patient not found.' });
 
-      const { encrypted_private_key, iv, salt, email, lastname, firstname, middlename } = rows[0];
+      const { encrypted_private_key, iv, salt, email, lastname, firstname, middlename } = patientRow;
       const patient_email = email;
       const patient_name = `${lastname} ${firstname} ${middlename}`;
 
+      // 2. Fetch all encrypted medical history records
       const historyResult = await query(
-      'SELECT encrypted_aes_key, iv, encryptedData FROM patient_medical_history WHERE patient_id = ? ORDER BY created_at DESC LIMIT 1',
-      [patient_id]
-    );
-    
-    if (historyResult.length === 0) return res.status(404).json({ message: 'No medical history found' });
+        'SELECT encrypted_aes_key, iv, encryptedData FROM patient_medical_history WHERE patient_id = ?',
+        [patient_id]
+      );
+      if (historyResult.length === 0) return res.status(404).json({ message: 'No medical history found.' });
+      console.log("Database history records:", historyResult.length);
 
-    const { encrypted_aes_key, iv: historyIv, encryptedData } = historyResult[0];
-
-      // 2. Decrypt private key with passphrase
+      // 3. Decrypt the private key
       let privateKeyPem;
       try {
         privateKeyPem = decryptPrivateKeyWithPassphrase(encrypted_private_key, passphrase, iv, salt);
@@ -404,44 +431,118 @@ export const decryptUploadPDF = [
         return res.status(401).json({ message: 'Invalid passphrase. Decryption failed.' });
       }
 
-      // 3. Load and parse PDF with pdf2json
+      // 4. Parse uploaded PDF
       const pdfParser = new PDFParser();
-
       const pdfData = await new Promise((resolve, reject) => {
         pdfParser.on("pdfParser_dataError", err => reject(err.parserError));
         pdfParser.on("pdfParser_dataReady", pdfData => resolve(pdfData));
         pdfParser.loadPDF(req.file.path);
       });
 
-      // 4. Extract text lines from pdf2json output
+      // 5. Extract and normalize PDF encrypted blocks
       const allLines = extractTextLinesFromPdf2Json(pdfData);
-
-      // 5. Extract encrypted blocks from the lines
       const encryptedRecords = extractEncryptedRecords(allLines);
+      console.log("Extracted encrypted records:", encryptedRecords.length);
 
-      // 6. Decrypt each record
+      // 6. Build hash map from DB
+      const dbRecordMap = new Map();
+      historyResult.forEach((record) => {
+        const hash = hashBase64(record.encryptedData);
+        dbRecordMap.set(hash, record);
+      });
+
+      // 7. Decrypt each PDF record
       const decryptedResults = encryptedRecords.map(({ recordNumber, title, encryptedBase64 }) => {
+        const cleaned = encryptedBase64.trim().replace(/\s+/g, '');
+        const hash = hashBase64(cleaned);
+        const matched = dbRecordMap.get(hash);
+
+        console.log(`Matching for record #${recordNumber}...`);
+        if (!matched) {
+          console.log(`❌ No exact hash match for: ${hash}`);
+
+          // Optional fallback match
+          const fallback = historyResult.find((item) => {
+            const dbData = item.encryptedData.trim().replace(/\s+/g, '');
+            return dbData.includes(cleaned) || cleaned.includes(dbData);
+          });
+
+          if (!fallback) {
+            return { recordNumber, title, decrypted: 'No matching encrypted data found.' };
+          }
+
+          try {
+            const decrypted = decryptMedicalHistoryHybrid(
+              fallback.encrypted_aes_key,
+              fallback.iv,
+              fallback.encryptedData,
+              privateKeyPem
+            );
+            return { recordNumber, title, decrypted };
+          } catch (err) {
+            console.error(`Failed to decrypt fallback record #${recordNumber}:`, err.message);
+            return { recordNumber, title, decrypted: 'Failed to decrypt record (fallback).' };
+          }
+        }
+
+        // Exact hash match
         try {
-          const decrypted = decryptMedicalHistoryHybrid(encrypted_aes_key, historyIv, encryptedBase64, privateKeyPem);
+          const decrypted = decryptMedicalHistoryHybrid(
+            matched.encrypted_aes_key,
+            matched.iv,
+            matched.encryptedData,
+            privateKeyPem
+          );
           return { recordNumber, title, decrypted };
-        } catch {
-          return { recordNumber, title, decrypted: 'Failed to decrypt record' };
+        } catch (err) {
+          console.error(`Failed to decrypt record #${recordNumber}:`, err.message);
+          return { recordNumber, title, decrypted: 'Failed to decrypt record.' };
         }
       });
 
-      // 7. Generate new PDF with decrypted records
-      const decryptedPdfBuffer = await generateDecryptedPDF(decryptedResults, patient_name);
+      console.log("Final decrypted results:", decryptedResults.length);
 
-      // 8. Send decrypted PDF via email
+      // 8. Generate and email PDF
+      const decryptedPdfBuffer = await generateDecryptedPDF(decryptedResults, patient_name);
       await sendEmailWithAttachment(patient_email, patient_name, decryptedPdfBuffer, patient_id);
 
-      // 9. Cleanup uploaded file
+      // 9. Clean up
       fs.unlinkSync(req.file.path);
+      await query('INSERT INTO patient_notifications (patient_id, message) VALUES (?, ?)',
+        [patient_id, "Decryption successful. PDF sent by email."]);
 
-      return res.status(200).json({ message: 'Decryption successful. Decrypted PDF sent by email.' });
+      return res.status(200).json({ message: 'Decryption successful. PDF sent by email.' });
+
     } catch (err) {
       console.error("Decryption error:", err);
       return res.status(500).json({ message: 'Error decrypting the PDF.' });
     }
   }
 ];
+
+export const patientProfile = async(req, res)=>{
+  try{
+    const {id} = req.user;
+    const patient_id = id;
+    const patient = await query("SELECT * FROM patient_details WHERE patient_id = ?", [patient_id]);
+    return res.status(200).json({patient})
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "Internal Server Error."})
+  }
+}
+
+export const getPatientNotifications = async (req, res) => {
+  try {
+    const patient_id = req.user.id;
+
+    const rows = await query(
+      'SELECT id, message, DATE_FORMAT(created_at, "%M %d, %Y") as date, DATE_FORMAT(created_at, "%h:%i %p") as time FROM patient_notifications WHERE patient_id = ? ORDER BY created_at DESC',
+      [patient_id]
+    );
+    return res.status(200).json({ notifications: rows });
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    return res.status(500).json({ message: 'Failed to retrieve notifications.' });
+  }
+};
