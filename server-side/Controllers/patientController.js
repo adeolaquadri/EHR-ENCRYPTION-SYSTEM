@@ -95,6 +95,11 @@ export const requestMedicalHistory = async (req, res) => {
     console.log("Email sent result:", emailResponse);
       await query('INSERT INTO patient_notifications (patient_id, message) VALUES (?, ?)',
       [patient_id, "Medical history has been emailed securely."]);
+
+      await query(
+      "INSERT INTO request_history (patient_id) VALUES (?)",
+      [patient_id]
+    );
     res.json({ success: true, message: 'Medical history has been emailed securely.' });
   } catch (err) {
     console.error(err);
@@ -544,5 +549,27 @@ export const getPatientNotifications = async (req, res) => {
   } catch (error) {
     console.error('Error fetching notifications:', error);
     return res.status(500).json({ message: 'Failed to retrieve notifications.' });
+  }
+};
+
+
+export const markNotificationAsRead = async (req, res) => {
+  const { id } = req.params;
+  const patient_id = req.user.id;
+
+  try {
+    const result = await query(
+      `UPDATE patient_notifications SET is_read = TRUE WHERE id = ? AND patient_id = ?`,
+      [id, patient_id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: "Notification not found." });
+    }
+
+    res.status(200).json({ message: "Notification marked as read." });
+  } catch (error) {
+    console.error("Mark read error:", error);
+    res.status(500).json({ message: "Error updating notification." });
   }
 };

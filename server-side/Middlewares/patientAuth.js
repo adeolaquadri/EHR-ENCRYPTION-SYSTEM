@@ -24,10 +24,26 @@ export const verifyToken = (req, res, next) => {
   };
   
 
-// Rate limit config for medical history requests
+// Rate limit config for encrypted medical history requests
 export const medicalHistoryLimiter = rateLimit({
   windowMs: 60 * 60 * 24 * 1000, // 24 hours window
-  max: 1, // limit each patient to 5 requests per windowMs
+  max: 3, // limit each patient to 5 requests per windowMs
+  message: {
+    success: false,
+    message: 'Too many requests from this patient. Please try again after 24 hours.'
+  },
+  keyGenerator: (req) => {
+    // Use patient_id as unique key if available, else fallback to IP
+    return req.body.patient_id || req.ip;
+  },
+  standardHeaders: true, // Return rate limit info in headers
+  legacyHeaders: false, // Disable `X-RateLimit-*` headers
+});
+
+//Rate limit config for medical history decrypt requests
+export const medicalHistoryDecryptLimiter = rateLimit({
+  windowMs: 60 * 60 * 24 * 1000, // 24 hours window
+  max: 3, // limit each patient to 5 requests per windowMs
   message: {
     success: false,
     message: 'Too many requests from this patient. Please try again after 24 hours.'

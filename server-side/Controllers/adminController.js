@@ -401,3 +401,15 @@ export const getNotifications = async (req, res) => {
     return res.status(500).json({ message: 'Failed to retrieve notifications.' });
   }
 };
+
+export const getRequestHistory = async (req, res)=>{
+  try{
+
+    const results = await query("SELECT * FROM request_history");
+    return res.status(200).json({history: results});
+    
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "Failed to retrieve requests history."})
+  }
+}

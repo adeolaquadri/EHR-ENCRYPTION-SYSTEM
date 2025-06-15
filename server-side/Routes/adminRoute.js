@@ -4,6 +4,7 @@ import {
     addPatient,
     getNotifications,
     getPatients,
+    getRequestHistory,
     login,
     resetPassword,
     signup} from "../Controllers/adminController.js"
@@ -25,5 +26,7 @@ route.get('/patients', verifyToken, getPatients); //GET: Fetch all patients
 route.post('/add_patient_medical_history', verifyToken, addMedicalHistory); //POST: Add Patient Medical History
 
 route.get('/notifications', verifyToken, getNotifications); //GET: Get Notifications
+
+route.get('/request-history', verifyToken, getRequestHistory); //GET: Get requests history
 
 export default route;
