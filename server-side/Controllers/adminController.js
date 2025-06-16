@@ -413,3 +413,30 @@ export const getRequestHistory = async (req, res)=>{
     return res.status(500).json({message: "Failed to retrieve requests history."})
   }
 }
+
+export const updatePatient = async (req, res)=>{
+  try{
+    const {id} = req.params;
+    const admin_email = req.user.email;
+    const {lastname, firstname, 
+           middlename, email,
+           dob, phone_number,
+           address, next_of_kin_name, next_of_kin_number} = req.body;
+
+    await query(
+      `UPDATE patient_details SET lastname = ?, firstname = ?, middlename = ? ,
+      email = ?, phone_number = ?, dob = ?, address = ?, next_of_kin_name = ?,
+      next_of_kin_number = ? WHERE patient_id = ?`,[
+        lastname, firstname, middlename, email, phone_number, 
+        dob, address, next_of_kin_name, next_of_kin_number, id
+      ]);
+
+    await query('INSERT INTO admin_notifications (admin_email, message) VALUES (?, ?)',
+        [admin_email, `Patient with id "${id}" details updated successfully.`]);
+      return res.status(200).json({message: `Patient with id "${id}" details updated successfully.`});
+
+  }catch(e){
+    console.error(e.message);
+    return res.status(500).json({message: "Internal Server Error."})
+  }
+}

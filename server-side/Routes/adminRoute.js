@@ -7,7 +7,8 @@ import {
     getRequestHistory,
     login,
     resetPassword,
-    signup} from "../Controllers/adminController.js"
+    signup,
+    updatePatient} from "../Controllers/adminController.js"
 import { verifyToken } from "../Middlewares/adminAuth.js";
 const route = Router();
 
@@ -28,5 +29,7 @@ route.post('/add_patient_medical_history', verifyToken, addMedicalHistory); //PO
 route.get('/notifications', verifyToken, getNotifications); //GET: Get Notifications
 
 route.get('/request-history', verifyToken, getRequestHistory); //GET: Get requests history
+
+route.put('/patients/:id', verifyToken, updatePatient); //PUT: Update Patient details
 
 export default route;

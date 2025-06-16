@@ -118,7 +118,7 @@ async function generateEncryptedPDF(records, patientName) {
     name: "Federal College of Animal Health & Production Technology",
     address: "Ibadan, Oyo State, Nigeria",
     phone: "+234 123 456 7890",
-    email: "info@fcahptibursaryps.com.ng"
+    email: "info@fcahptmedicalcentreehr.com.ng"
   };
 
   function drawHeader() {
@@ -319,7 +319,7 @@ async function generateDecryptedPDF(records, patientName) {
     name: "Federal College of Animal Health & Production Technology",
     address: "Ibadan, Oyo State, Nigeria",
     phone: "+234 123 456 7890",
-    email: "info@fcahptibursaryps.com.ng"
+    email: "info@fcahptmedicalcentreehr.com.ng"
   };
 
   return new Promise((resolve, reject) => {
@@ -382,7 +382,7 @@ async function sendEmailWithAttachment(toEmail, patientName, pdfBuffer, patientI
     from: 'EHR <admin@fcahptibbursaryps.com.ng>', // Your verified sender email
     to: toEmail,
     subject: 'Your Decrypted Medical History',
-    text: `Dear ${patientName},\n\nPlease find attached your decrypted medical history.\n\nRegards,\nFCAHPT Team`,
+    text: `Dear ${patientName},\n\nPlease find attached your decrypted medical history.\n\nRegards,\nFCAHPT MEDICAL CENTRE Team`,
     attachments: [
       {
         filename: `medical-history-${patientId}.pdf`,
